@@ -52,9 +52,60 @@ namespace DoseGridDataGen
                     "C96",
                 };
 
+            // not exhaustive yet and maybe I won't use this....
             List<string> TRACKEDOARS = new List<string>()
             {
+                "OpticChiasm",
+                "OpticNrv",
+                "OpticNrv_L",
+                "OpticNrv_R",
+                "Brainstem",
+                "Pineal",
+                "Pituitary",
+                "Retinas",
+                "Retina_L",
+                "Retina_R",
+                "Pons",
+                "Parotids",
+                "Parotid_R",
+                "Parotid_L",
+                "Palate_Soft",
+                "Lens",
+                "Lens_L",
+                "Lens_R",
+                "Lips",
+                "Hypothalamus",
+                "Glnd_Lacrimal",
+                "Glnd_Lacrimal_L",
+                "Glnd_Lacrimal_R",
+                "Glnd_Subling_L",
+                "Glnd_Subling_R",
+                "Glnd_Sublings",
+                "Glnd_Submand_L",
+                "Glnd_Submand_R",
+                "Glnd_Submands",
+                "Eye_L",
+                "Eye_R",
+                "Eyes",
+                "Cochlea",
+                "Cochlea_L",
+                "Cochlea_R",
+                "Cornea",
+                "Cornea_L",
+                "Cornea_R",
+            };
 
+            List<double> DOSEGRIDS = new List<double>()
+            {
+                0.1,
+                //0.125,
+                0.15,
+                //0.175,
+                0.2,
+                //0.225,
+                0.25,
+                //0.275,
+                0.3
             };
 
             List<string> TRACKEDPARAMS = new List<string>()
@@ -72,6 +123,9 @@ namespace DoseGridDataGen
                 "Course Name",
                 "Plan Name"
             };
+
+            DataTable result = new DataTable();
+            foreach (string columnName in TRACKEDPARAMS) { result.Columns.Add(columnName); }
 
             int CUTOFF = 90;
             string settingsPath = "settings.txt";
@@ -121,8 +175,18 @@ namespace DoseGridDataGen
                     foreach (ExternalPlanSetup plan in course.ExternalPlanSetups)
                     {
                         if (!plan.IsTreated) { continue; }
-                        var target = plan.TargetVolumeID;
-                        TG263ParseResult targetParse = StructureParserMethods.StructureParser(target, TG263Table, cutoff: CUTOFF);
+                        string targetID = plan.TargetVolumeID;
+                        Structure targetStructure = plan.StructureSet.Structures.Where(structure => structure.Id == targetID).FirstOrDefault();
+
+                        TG263ParseResult targetParse = StructureParserMethods.StructureParser(targetID, TG263Table, cutoff: CUTOFF);
+
+                        // meat and potatoes
+                        foreach (double gridSize in DOSEGRIDS)
+                        {
+                            //
+                        }
+
+
                     }
                     courseCounter++;
                 }

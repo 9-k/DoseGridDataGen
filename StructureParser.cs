@@ -26,7 +26,7 @@ namespace DoseGridDataGen
 
     public class StructureParserMethods
     {
-        public static TG263ParseResult StructureParser(string structName, DataTable TG263Table, int topN=1, float cutoff=0)
+        public static TG263ParseResult StructureParser(string structName, DataTable TG263Table, int topN=1, int cutoff=0)
         {
             TG263ParseResult result = new TG263ParseResult();
             structName.Trim();
