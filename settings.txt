@@ -1,1 +1,3 @@
-﻿
+﻿mrnPath: mrns.csv
+TG263Path: TG263.csv
+dummyPtId: TODO
