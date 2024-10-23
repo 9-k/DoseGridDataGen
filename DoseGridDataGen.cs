@@ -7,6 +7,7 @@ using System.Reflection;
 using VMS.TPS.Common.Model.API;
 using VMS.TPS.Common.Model.Types;
 using ESAPIUtilities;
+using System.Data;
 
 // TODO: Replace the following version attributes by creating AssemblyInfo.cs. You can do this in the properties of the Visual Studio project.
 [assembly: AssemblyVersion("1.0.0.1")]
@@ -72,6 +73,7 @@ namespace DoseGridDataGen
                 "Plan Name"
             };
 
+            int CUTOFF = 90;
             string settingsPath = "settings.txt";
             string assyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
@@ -80,6 +82,25 @@ namespace DoseGridDataGen
             string mrnPath = Path.GetFullPath(settingsDict["mrnPath"]);
             string TG263Path = Path.GetFullPath(settingsDict["TG263Path"]);
             string dummyPtId = settingsDict["dummyPtId"];
+
+            DataTable TG263Table = new DataTable();
+            using (var reader = new StreamReader(TG263Path))
+            {
+                var headers = reader.ReadLine().Split(',');
+
+                // Create columns based on CSV headers
+                foreach (var header in headers)
+                {
+                    TG263Table.Columns.Add(header);
+                }
+
+                // Read rows and add them to the DataTable
+                while (!reader.EndOfStream)
+                {
+                    var rowValues = reader.ReadLine().Split(',');
+                    TG263Table.Rows.Add(rowValues);
+                }
+            }
 
             IEnumerable<string> mrnList = File.ReadLines(mrnPath)
                 .Select(line => line.Trim())
@@ -99,8 +120,9 @@ namespace DoseGridDataGen
                 {
                     foreach (ExternalPlanSetup plan in course.ExternalPlanSetups)
                     {
+                        if (!plan.IsTreated) { continue; }
                         var target = plan.TargetVolumeID;
-
+                        TG263ParseResult targetParse = StructureParserMethods.StructureParser(target, TG263Table, cutoff: CUTOFF);
                     }
                     courseCounter++;
                 }
