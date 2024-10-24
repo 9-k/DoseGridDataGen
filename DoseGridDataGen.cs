@@ -15,7 +15,7 @@ using System.Data;
 [assembly: AssemblyInformationalVersion("1.0")]
 
 // TODO: Uncomment the following line if the script requires write access.
-// [assembly: ESAPIScript(IsWriteable = true)]
+[assembly: ESAPIScript(IsWriteable = true)]
 
 namespace DoseGridDataGen
 {
@@ -108,8 +108,8 @@ namespace DoseGridDataGen
 
             foreach (string mrn in mrnList)
             {
-                // copying between patients is a total drag.
-                // I'm just going to do everything in situ then NOT save any modifications... so it all gets rolled back? hopefully?
+                // copying between patients is not possible.
+                // I'm just going to do everything in situ then NOT save any modifications... so it all gets rolled back.
                 Patient patient = app.OpenPatientById(mrn);
                 List<Course> coursesMatchingDxList =
                     patient.Courses
@@ -129,7 +129,6 @@ namespace DoseGridDataGen
                     {
                         if (!originalPlan.IsTreated) { continue; }
 
-
                         ExternalPlanSetup plan = GridProj.CopyPlanSetup(originalPlan) as ExternalPlanSetup;
                         string ActualTargetName = plan.TargetVolumeID;
                         Structure targetStructure = plan.StructureSet.Structures.Where(structure => structure.Id == ActualTargetName).FirstOrDefault();
@@ -140,7 +139,6 @@ namespace DoseGridDataGen
                             cutoff: PARSEMATCHCUTOFF)
                             .matches.First().Item1["TG263-Primary Name"] as string;
                         double TargetVolume = targetStructure.Volume;
-                        //todo
                         double TargetMeanDose = plan.GetDVHCumulativeData(
                             targetStructure, 
                             DoseValuePresentation.Absolute, 
@@ -154,20 +152,6 @@ namespace DoseGridDataGen
                             1).MaxDose.Dose;
 
                         double TargetV95 = ESAPIUtility.GetVXX(targetStructure, plan, 95, VolumePresentation.Relative);
-
-                        // targtet stuff
-                        //"Actual Target Name",
-                        //"TG263 Target Name Guess",
-                        //"Target Volume",
-                        //"Target Mean Dose",
-                        //"Target Hot Spot",
-                        //"Target V95",
-
-
-                        //string priorGridSize;
-                        //string priorSRSGridSize;
-                        //plan.GetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCM", out priorGridSize);
-                        //plan.GetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCMForSRSAndHyperArc", out priorSRSGridSize);
 
                         foreach (string gridSize in DOSEGRIDS)
                         {
