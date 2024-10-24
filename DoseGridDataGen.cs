@@ -111,6 +111,7 @@ namespace DoseGridDataGen
                 // copying between patients is not possible.
                 // I'm just going to do everything in situ then NOT save any modifications... so it all gets rolled back.
                 Patient patient = app.OpenPatientById(mrn);
+                patient.BeginModifications();
                 List<Course> coursesMatchingDxList =
                     patient.Courses
                     .Where(course => course.Diagnoses
@@ -124,6 +125,7 @@ namespace DoseGridDataGen
 
                 foreach (Course course in coursesMatchingDxList)
                 {
+                    // if course name contains qa,,,, skip?
                     string CourseDx = course.Diagnoses.Where(dx => ICDCODELIST.Any(code => dx.Code.Contains(code))).First().Code;
                     foreach (ExternalPlanSetup originalPlan in course.ExternalPlanSetups)
                     {
@@ -220,6 +222,30 @@ namespace DoseGridDataGen
                     }
                 }
                 app.ClosePatient();
+            }
+
+            string EscapeCsvField(string field)
+            {
+                if (field.Contains(",") || field.Contains("\"") || field.Contains("\n"))
+                {
+                    return "\"" + field.Replace("\"", "\"\"") + "\"";
+                }
+                return field;
+            }
+
+
+            using (StreamWriter writer = new StreamWriter("output.csv", false, Encoding.UTF8))
+            {
+                // Optionally write the column headers
+                var columnNames = result.Columns.Cast<DataColumn>().Select(column => column.ColumnName);
+                writer.WriteLine(string.Join(",", columnNames));
+
+                // Write each row
+                foreach (DataRow row in result.Rows)
+                {
+                    var fields = row.ItemArray.Select(field => EscapeCsvField(field.ToString()));
+                    writer.WriteLine(string.Join(",", fields));
+                }
             }
         }
 
