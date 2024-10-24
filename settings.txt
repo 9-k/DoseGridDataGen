@@ -1,3 +1,6 @@
 ﻿mrnPath: mrns.csv
-TG263Path: TG263.csv
-dummyPtId: TODO
+TG263Path: TG263_reduced.csv
+doseGridsPath: dgrids.csv
+ICDCodesPath: icdcodes.csv
+projectCourseID: GridProj
+parseMatchCutoff: 90

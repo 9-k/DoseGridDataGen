@@ -38,104 +38,50 @@ namespace DoseGridDataGen
         }
         static void Execute(Application app)
         {
-            // you absolutely need to ensure this list matches with the database crawl list
-            List<string> ICDCODELIST = new List<string>()
-                {
-                    "C44",
-                    "C69",
-                    "C70",
-                    "C71",
-                    "C72",
-                    "C75.1",
-                    "C76",
-                    "C79.3",
-                    "C96",
-                };
-
-            // not exhaustive yet and maybe I won't use this....
-            List<string> TRACKEDOARS = new List<string>()
-            {
-                "OpticChiasm",
-                "OpticNrv",
-                "OpticNrv_L",
-                "OpticNrv_R",
-                "Brainstem",
-                "Pineal",
-                "Pituitary",
-                "Retinas",
-                "Retina_L",
-                "Retina_R",
-                "Pons",
-                "Parotids",
-                "Parotid_R",
-                "Parotid_L",
-                "Palate_Soft",
-                "Lens",
-                "Lens_L",
-                "Lens_R",
-                "Lips",
-                "Hypothalamus",
-                "Glnd_Lacrimal",
-                "Glnd_Lacrimal_L",
-                "Glnd_Lacrimal_R",
-                "Glnd_Subling_L",
-                "Glnd_Subling_R",
-                "Glnd_Sublings",
-                "Glnd_Submand_L",
-                "Glnd_Submand_R",
-                "Glnd_Submands",
-                "Eye_L",
-                "Eye_R",
-                "Eyes",
-                "Cochlea",
-                "Cochlea_L",
-                "Cochlea_R",
-                "Cornea",
-                "Cornea_L",
-                "Cornea_R",
-            };
-
-            List<double> DOSEGRIDS = new List<double>()
-            {
-                0.1,
-                //0.125,
-                0.15,
-                //0.175,
-                0.2,
-                //0.225,
-                0.25,
-                //0.275,
-                0.3
-            };
-
+            // It doesn't make sense to also make trackedparams external because this isnt nor should
+            // it be user settable. 
             List<string> TRACKEDPARAMS = new List<string>()
             {
-                "Target FMAID",
-                "OAR FMAID",
+                // target stuff
+                "Actual Target Name",
+                "TG263 Target Name Guess",
                 "Target Volume",
+                "Target Mean Dose",
+                "Target Hot Spot",
+                "Target V95",
+                // oar stuff
+                "Actual OAR Name",
+                "TG263 OAR Name Guess",
                 "OAR Volume",
+                "OAR Mean Dose",
+                "OAR D0.03",
+                // misc
                 "Minimum Separation",
                 "Centroid Separation",
-                "Prescription Dose To Target",
-                "True Dose To Target",
-                "Grid Size", 
+                "Grid Size",
                 "MRN",
                 "Course Name",
-                "Plan Name"
+                "Plan Name",
+                "Plan Dx"
             };
 
             DataTable result = new DataTable();
             foreach (string columnName in TRACKEDPARAMS) { result.Columns.Add(columnName); }
 
-            int CUTOFF = 90;
             string settingsPath = "settings.txt";
-            string assyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
+            //string assyPath = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location);
 
             Dictionary <string,string> settingsDict = ESAPIUtility.SettingsDict(settingsPath);
 
             string mrnPath = Path.GetFullPath(settingsDict["mrnPath"]);
             string TG263Path = Path.GetFullPath(settingsDict["TG263Path"]);
-            string dummyPtId = settingsDict["dummyPtId"];
+            string ICDCodesPath = Path.GetFullPath(settingsDict["ICDCodesPath"]);
+            string doseGridsPath = Path.GetFullPath(settingsDict["doseGridsPath"]);
+
+            string projectCourseID = settingsDict["projectCourseID"];
+            int PARSEMATCHCUTOFF = Int32.Parse(settingsDict["parseMatchCutoff"]);
+            List<string> DOSEGRIDS = File.ReadAllLines(doseGridsPath).ToList();
+            List<string> ICDCODELIST = File.ReadAllLines(ICDCodesPath).ToList();  
 
             DataTable TG263Table = new DataTable();
             using (var reader = new StreamReader(TG263Path))
@@ -160,35 +106,134 @@ namespace DoseGridDataGen
                 .Select(line => line.Trim())
                 .Where(line => !string.IsNullOrEmpty(line));
 
-            int courseCounter = 0;
-            int patientCounter = 0;
             foreach (string mrn in mrnList)
             {
+                // copying between patients is a total drag.
+                // I'm just going to do everything in situ then NOT save any modifications... so it all gets rolled back? hopefully?
                 Patient patient = app.OpenPatientById(mrn);
                 List<Course> coursesMatchingDxList =
                     patient.Courses
                     .Where(course => course.Diagnoses
                     .Any(dx => ICDCODELIST.Any(code => dx.Code.Contains(code)))).ToList();
 
+                // now I don't know why this would ping but just in case:
+                if (coursesMatchingDxList.Count <= 0) { continue; }
+
+                Course GridProj = patient.AddCourse();
+                GridProj.Id = projectCourseID;
+
                 foreach (Course course in coursesMatchingDxList)
                 {
-                    foreach (ExternalPlanSetup plan in course.ExternalPlanSetups)
+                    string CourseDx = course.Diagnoses.Where(dx => ICDCODELIST.Any(code => dx.Code.Contains(code))).First().Code;
+                    foreach (ExternalPlanSetup originalPlan in course.ExternalPlanSetups)
                     {
-                        if (!plan.IsTreated) { continue; }
-                        string targetID = plan.TargetVolumeID;
-                        Structure targetStructure = plan.StructureSet.Structures.Where(structure => structure.Id == targetID).FirstOrDefault();
+                        if (!originalPlan.IsTreated) { continue; }
 
-                        TG263ParseResult targetParse = StructureParserMethods.StructureParser(targetID, TG263Table, cutoff: CUTOFF);
 
-                        // meat and potatoes
-                        foreach (double gridSize in DOSEGRIDS)
+                        ExternalPlanSetup plan = GridProj.CopyPlanSetup(originalPlan) as ExternalPlanSetup;
+                        string ActualTargetName = plan.TargetVolumeID;
+                        Structure targetStructure = plan.StructureSet.Structures.Where(structure => structure.Id == ActualTargetName).FirstOrDefault();
+
+                        string TG263TargetNameGuess = StructureParserMethods.StructureParser(
+                            ActualTargetName, 
+                            TG263Table, 
+                            cutoff: PARSEMATCHCUTOFF)
+                            .matches.First().Item1["TG263-Primary Name"] as string;
+                        double TargetVolume = targetStructure.Volume;
+                        //todo
+                        double TargetMeanDose = plan.GetDVHCumulativeData(
+                            targetStructure, 
+                            DoseValuePresentation.Absolute, 
+                            VolumePresentation.Relative, 
+                            1).MeanDose.Dose;
+
+                        double TargetHotSpot = plan.GetDVHCumulativeData(
+                            targetStructure,
+                            DoseValuePresentation.Absolute,
+                            VolumePresentation.Relative,
+                            1).MaxDose.Dose;
+
+                        double TargetV95 = ESAPIUtility.GetVXX(targetStructure, plan, 95, VolumePresentation.Relative);
+
+                        // targtet stuff
+                        //"Actual Target Name",
+                        //"TG263 Target Name Guess",
+                        //"Target Volume",
+                        //"Target Mean Dose",
+                        //"Target Hot Spot",
+                        //"Target V95",
+
+
+                        //string priorGridSize;
+                        //string priorSRSGridSize;
+                        //plan.GetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCM", out priorGridSize);
+                        //plan.GetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCMForSRSAndHyperArc", out priorSRSGridSize);
+
+                        foreach (string gridSize in DOSEGRIDS)
                         {
-                            //
+                            plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCM", gridSize);
+                            plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCMForSRSAndHyperArc", gridSize);
+                            plan.CalculateDose();
+                            foreach (Structure oar in plan.StructureSet.Structures)
+                            {
+                                string ActualOARName = oar.Id;
+                                TG263ParseResult TG263OARParse = StructureParserMethods.StructureParser(
+                                    ActualOARName,
+                                    TG263Table,
+                                    cutoff: PARSEMATCHCUTOFF);
+
+                                if (oar.Id == "BODY" ||
+                                    oar.Id == ActualTargetName ||
+                                    TG263OARParse.IsEval ||
+                                    TG263OARParse.IsPRV ||
+                                    TG263OARParse.IsOpti ||
+                                    TG263OARParse.IsDerived ||
+                                    TG263OARParse.IsPlanning ||
+                                    TG263OARParse.matches.Count < 1
+                                    ) { continue; }
+                                string TG263OARNameGuess = TG263OARParse.matches.First().Item1["TG263-Primary Name"] as string;
+                                double OARVolume = oar.Volume;
+                                double OARMeanDose = plan.GetDVHCumulativeData(
+                                    targetStructure,
+                                    DoseValuePresentation.Absolute,
+                                    VolumePresentation.Relative,
+                                    1).MeanDose.Dose;
+
+                                double OARHotSpot = plan.GetDVHCumulativeData(
+                                    targetStructure,
+                                    DoseValuePresentation.Absolute,
+                                    VolumePresentation.Relative,
+                                    1).MaxDose.Dose;
+
+                                double OARD003 = plan.GetDoseAtVolume(oar, 0.03, VolumePresentation.AbsoluteCm3, DoseValuePresentation.Absolute).Dose;
+
+                                double MinimumSeparation = ESAPIUtility.MinimumStructureDistance(targetStructure, oar);
+                                double CentroidSeparation = (targetStructure.CenterPoint - oar.CenterPoint).Length;
+                                DataRow newRow = result.NewRow();
+                                newRow["Actual Target Name"] = ActualTargetName;
+                                newRow["TG263 Target Name Guess"] = TG263TargetNameGuess;
+                                newRow["Target Volume"] = TargetVolume.ToString();
+                                newRow["Target Mean Dose"] = TargetMeanDose.ToString();
+                                newRow["Target Hot Spot"] = TargetHotSpot.ToString();
+                                newRow["Target V95"] = TargetV95.ToString();
+                                // oar stuff
+                                newRow["Actual OAR Name"] = ActualOARName;
+                                newRow["TG263 OAR Name Guess"] = TG263OARNameGuess;
+                                newRow["OAR Volume"] = OARVolume.ToString();
+                                newRow["OAR Mean Dose"] = OARMeanDose.ToString();
+                                newRow["OAR D0.03"] = OARD003.ToString();
+                                // misc
+                                newRow["Minimum Separation"] = MinimumSeparation.ToString();
+                                newRow["Centroid Separation"] = CentroidSeparation.ToString();
+                                newRow["Grid Size"] = gridSize;
+                                newRow["MRN"] = mrn.ToString();
+                                newRow["Course Name"] = course.Id;
+                                newRow["Plan Name"] = originalPlan.Id;
+                                newRow["Course Dx"] = CourseDx;
+                                result.Rows.Add(newRow);
+                            }
                         }
-
-
                     }
-                    courseCounter++;
                 }
                 app.ClosePatient();
             }
