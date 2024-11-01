@@ -21,6 +21,7 @@ namespace DoseGridDataGen
         public bool IsDerived { get; set; }
         public bool IsPlanning { get; set; }
         public bool IsPRV { get; set; }
+        public bool IsCouch { get; set; }
         public List<ValueTuple<DataRow, int>> matches { get; set; }
     }
 
@@ -32,59 +33,49 @@ namespace DoseGridDataGen
             structName.Trim();
             structName.TrimStart('z', 'Z', '_');
             string sup = structName.ToUpper();
-            if (sup.Contains("EVAL"))
-            {
-                result.IsEval = true;
-            }
-            if (sup.Contains("-") || sup.Contains("+"))
-            {
-                result.IsDerived = true;
-            }
+            if (sup.Contains("EVAL")) { result.IsEval = true; }
+            if (sup.Contains("-") ||
+                sup.Contains("MINUS") ||
+                sup.Contains("+") ||
+                sup.Contains("PLUS")
+                ) { result.IsDerived = true; }
             // if it starts with 'p' and it matches better if I remove p,
-            if (structName.StartsWith("p") && 
-                StructureParser(structName.TrimStart('p'), TG263Table).matches.First().Item2 > StructureParser(structName, TG263Table).matches.First().Item2)
-            {
-                result.IsPlanning = true;
-            }
+            //if (structName.StartsWith("p") && 
+            //    StructureParser(structName.TrimStart('p'), TG263Table).matches.First().Item2 > StructureParser(structName, TG263Table).matches.First().Item2)
+            //{
+            //    result.IsPlanning = true;
+            //}
 
             int numOpts = Regex.Matches(sup, "OPT").Count;
-            bool contOptic = sup.Contains("OPTIC");
+            int numOptics = Regex.Matches(sup, "OPTIC").Count;
 
-            // if there's exactly one instance of OPT and the string contains OPTIC
-            if (!(numOpts == 1 && contOptic))
-            {
-                result.IsOpti = true;
-            }
-            if (sup.Contains("PRV"))
-            {
-                result.IsPRV = true;
-            }
-
+            // if the number of matches isn't the same between opt and optic, then one or more of those counts has to be
+            // a loose OPT or OPTI ( as #optic matches <= #opt matches, as every #optic match also yields an #opt.
+            if (numOpts != numOptics) { result.IsOpti = true; }
+            if (sup.Contains("PRV")) { result.IsPRV = true; }
+            if (sup.Contains("COUCH")) { result.IsCouch = true; }
             if (topN >= 1)
             {
-                var dists = new List<ValueTuple<string, int>>();
-                List<ValueTuple<DataRow, int>> matches = new List<ValueTuple<DataRow, int>>();
+                var tempMatches = new List<ValueTuple<DataRow, int>>();
 
                 foreach (DataRow row in TG263Table.Rows)
                 {
                     // gotta match to upper so that casing doesn't make an issue
-                    string TG263name = row["TG263-Primary Name"].ToString().ToUpper();
-                    int dist = Fuzz.WeightedRatio(sup, TG263name);
-                    dists.Add((TG263name, dist));
+                    string TG263name = row["TG263-Primary Name"].ToString();
+                    int similarity = Fuzz.WeightedRatio(sup, TG263name.ToUpper());
+                    if (similarity > cutoff) { tempMatches.Add((row, similarity)); }
                 }
-
-                dists.OrderByDescending(x => x.Item2).Take(topN);
-
-                foreach (ValueTuple<string, int> dist in dists)
-                {
-                    DataRow match = TG263Table.Select($"Name = '{dist.Item1}'").First();
-                    matches.Add((match, dist.Item2));
-                }
-                result.matches = matches;
+                result.matches = tempMatches.OrderByDescending(x => x.Item2).Take(topN).ToList();
             }
 
-            // apply cutoff 
-            result.matches.RemoveAll(element => element.Item2 < cutoff);
+            if (sup.StartsWith("P"))
+            {
+                int scoreToBeat = StructureParser(structName.TrimStart('p', 'P'), TG263Table).matches.First().Item2;
+                if (result.matches.First().Item2 < scoreToBeat)
+                {
+                    result.IsPlanning = true;
+                }
+            }
             return result;
         }
     }
