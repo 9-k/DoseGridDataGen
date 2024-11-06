@@ -154,13 +154,22 @@ namespace DoseGridDataGen
                     patient = app.OpenPatientById(mrn);
                     Console.WriteLine($"Successfully opened patient {mrn}.");
                 }
-                catch
+                catch (Exception ex)
                 {
                     Console.WriteLine($"Failed to open patient {mrn}. Continuing:");
+                    Console.WriteLine(ex.Message);
                     continue;
                 }
+                try
+                {
+                    patient.BeginModifications();
+                }
+                catch (Exception e)
+                {
+                    Console.WriteLine("Failed to BeginModifications. Continuing");
+                    Console.WriteLine(e.Message);   
+                }
                 
-                patient.BeginModifications();
                 
 #if DEBUG       // just do all courses and don't worry about filtering for matching to icd list 
                 List<Course> coursesMatchingDxList = patient.Courses.ToList();
@@ -188,8 +197,17 @@ namespace DoseGridDataGen
 #if DEBUG
                     string CourseDx = "DEBUG!";
 #else
-                    if (course.Id.ToUpper().Contains("DNU") || course.Id.ToUpper().Contains("QA") || course.Id.ToUpper().Contains("TEST")) { continue; }
-                    string CourseDx = course.Diagnoses.Where(dx => ICDCODELIST.Any(code => dx.Code.Contains(code))).First().Code;          
+                    if (course.Id.ToUpper().Contains("DNU") || course.Id.ToUpper().Contains("QA") || course.Id.ToUpper().Contains("TEST")) 
+                    {
+                        Console.WriteLine($"Skipping course {course.Id} because I don't like its name.");
+                        continue; 
+                    }
+                    string CourseDx = course.Diagnoses.Where(dx => ICDCODELIST.Any(code => dx.Code.Contains(code))).First().Code; 
+                    if (string.IsNullOrEmpty(CourseDx))
+                    {
+                        Console.WriteLine("Strangely no Dx for this course... skipping");
+                        continue;
+                    }
 #endif
                     if (course.ExternalPlanSetups.Count() < 1)
                     {
@@ -200,24 +218,59 @@ namespace DoseGridDataGen
                     foreach (ExternalPlanSetup originalPlan in course.ExternalPlanSetups)
                     {
                         Stopwatch planwatch = Stopwatch.StartNew();
-#if !DEBUG
-                        //if (!originalPlan.IsTreated) 
-                        //{
-                        //    Console.WriteLine("Looks like this plan wasn't treated - skipping.");
-                        //    continue; 
-                        //}
-#endif
+
                         Console.WriteLine("-----------------");
                         Console.WriteLine($"Working on plan {originalPlan.Id}");
-                        ExternalPlanSetup plan = GridProj.CopyPlanSetup(originalPlan) as ExternalPlanSetup;
+#if !DEBUG
+                        if (!originalPlan.IsTreated)
+                        {
+                            Console.WriteLine("Looks like this plan wasn't treated - skipping.");
+                            continue;
+                        }
+#endif
+
+                        if (originalPlan.StructureSet.Structures.Count() == 0)
+                        {
+                            Console.WriteLine("Well, this plan doesn't have any structures.... skipping.");
+                            continue;
+                        }
+
+                        ExternalPlanSetup plan = null;
+                        try
+                        {
+                            plan = GridProj.CopyPlanSetup(originalPlan) as ExternalPlanSetup;
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine(e.Message);
+                            Console.WriteLine($"Couldn't copy plan {originalPlan}. Skipping:");
+                            continue;
+                        }
+                        
                         string ActualTargetName = plan.TargetVolumeID;
                         Structure targetStructure = plan.StructureSet.Structures.Where(structure => structure.Id == ActualTargetName).FirstOrDefault();
 
-                        string TG263TargetNameGuess = StructureParserMethods.StructureParser(
-                            ActualTargetName, 
-                            TG263Table, 
+                        if (targetStructure != null)
+                        {
+                            Console.WriteLine("Could not fid a target structure for this plan. Skipping:");
+                            continue;
+                        }
+
+                        string TG263TargetNameGuess = null;
+                        try
+                        {
+                            TG263TargetNameGuess = StructureParserMethods.StructureParser(
+                            ActualTargetName,
+                            TG263Table,
                             cutoff: PARSEMATCHCUTOFF)
                             .matches.First().Item1["TG263-Primary Name"] as string;
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine("Couldn't name the target, skipping plan:");
+                            Console.WriteLine(e.Message);
+                            continue;
+                        }
 
                         foreach (string gridSize in DOSEGRIDS)
                         {
@@ -227,16 +280,28 @@ namespace DoseGridDataGen
                             {
                                 Console.WriteLine("...");
                                 Console.WriteLine($"Setting parameters for calc model {calcModel}!");
-                                plan.SetCalculationModel(CalculationType.PhotonVolumeDose, calcModel);
-
-                                bool didSetGrid = plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCM", gridSize);
-                                bool didSetSRSGrid = plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCMForSRSAndHyperArc", gridSize);
+                                bool didSetGrid = false;
+                                bool didSetSRSGrid = false;
+                                try
+                                {
+                                    plan.SetCalculationModel(CalculationType.PhotonVolumeDose, calcModel);
+                                    didSetGrid = plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCM", gridSize);
+                                    didSetSRSGrid = plan.SetCalculationOption(plan.PhotonCalculationModel, "CalculationGridSizeInCMForSRSAndHyperArc", gridSize);
+                                }
+                                catch (Exception e)
+                                {
+                                    Console.WriteLine(e.Message);
+                                    Console.WriteLine("Failed to set parameters for calc model. Moving to next calc:");
+                                    continue;
+                                }
+                                
                                 
                                 if (!(didSetGrid && didSetSRSGrid))
                                 {
-                                    Console.WriteLine("For some reason the script failed to set the gridsize. Aborting:");
-                                    throw new Exception();
+                                    Console.WriteLine("For some reason the script failed to set the gridsize. Skipping:");
+                                    continue;
                                 }
+
                                 bool gpuOn = plan.SetCalculationOption(plan.PhotonCalculationModel, "UseGPU", "Yes");
                                 // it's fine if the gpu isn't set lol so i'm not checking it
                                 double calcTime = 0;
